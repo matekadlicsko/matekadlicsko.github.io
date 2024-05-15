@@ -1,7 +1,0 @@
----
-title: "Welcome To My Blog"
-date: "2024-05-15"
----
-
-Hi, I'm a data scientist and I want to use this blog to share some things I have
-recently been thinking about.
