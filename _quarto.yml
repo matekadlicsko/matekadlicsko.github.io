@@ -1,0 +1,19 @@
+project:
+  type: website
+
+website:
+  title: "Mate Kadlicsko"
+  navbar:
+    right:
+      - about.qmd
+      - icon: github
+        href: https://github.com/matekadlicsko/
+      - icon: linkedin
+        href: https://www.linkedin.com/in/m%C3%A1t%C3%A9-kadlicsk%C3%B3-8b90198a/
+format:
+  html:
+    theme: lux
+    css: styles.css
+
+
+
