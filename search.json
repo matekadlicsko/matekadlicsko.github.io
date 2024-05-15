@@ -1,17 +1,10 @@
 [
   {
-    "objectID": "posts/welcome/index.html",
-    "href": "posts/welcome/index.html",
-    "title": "Welcome To My Blog",
-    "section": "",
-    "text": "Hi, I’m a data scientist and I want to use this blog to share some things I have recently been thinking about."
-  },
-  {
     "objectID": "index.html",
     "href": "index.html",
     "title": "Blog",
     "section": "",
-    "text": "Implementing an ETS model in JAX\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nWelcome To My Blog\n\n\n\n\n\n\n\n\n\n\n\nMay 15, 2024\n\n\n\n\n\n\nNo matching items"
+    "text": "No matching items"
   },
   {
     "objectID": "about.html",
@@ -19,47 +12,5 @@
     "title": "About Me",
     "section": "",
     "text": "Doing my best"
-  },
-  {
-    "objectID": "posts/jax-ets/index.html",
-    "href": "posts/jax-ets/index.html",
-    "title": "Implementing an ETS model in JAX",
-    "section": "",
-    "text": "In this notebook I demonstrate my JAX implementation of the ETS variant commonly denoted as \\((A_d, A)\\), which has an additive damped trend and an additive seasonality component. JAX is a high performance tensor library that offers functionalities like automatic differntiation, JIT compilation while having a familiar NumPy-like interface. However, there are some caveats, for example it only allows pure functions (so no side effects are allowed).\nThe main goal of this notebook is to explore JAX functionalities, especially lax.scan, which offers a convenient way around writing for-loops.\nA much more detailed introduction to ETS models can be found in Forecasting: Principles and Practice."
-  },
-  {
-    "objectID": "posts/jax-ets/index.html#imports-and-setup",
-    "href": "posts/jax-ets/index.html#imports-and-setup",
-    "title": "Implementing an ETS model in JAX",
-    "section": "Imports and Setup",
-    "text": "Imports and Setup\n\nimport numpy as np\nimport matplotlib\nimport matplotlib.pyplot as plt\nimport jax\nimport jax.numpy as jnp\nfrom jax.lax import scan\nfrom jax.scipy.optimize import minimize\nimport jaxopt\nfrom functools import partial\nimport pandas as pd\n\nmatplotlib.style.use(\"ggplot\")\nplt.rcParams[\"figure.figsize\"] = [10, 4]\n\nrng_key = jax.random.PRNGKey(seed=42)"
-  },
-  {
-    "objectID": "posts/jax-ets/index.html#data-loading",
-    "href": "posts/jax-ets/index.html#data-loading",
-    "title": "Implementing an ETS model in JAX",
-    "section": "Data Loading",
-    "text": "Data Loading\nWe will use the AirPassangers dataset.\n\nurl = \"https://raw.githubusercontent.com/selva86/datasets/master/AirPassengers.csv\"\ny = pd.read_csv(\n    url,\n    parse_dates=[\"date\"],\n).set_index(\"date\").sort_index()[\"value\"]\ny_train = jnp.array(y)[:-12]\ny_test = jnp.array(y)[-12:]\n\ny.plot()"
-  },
-  {
-    "objectID": "posts/jax-ets/index.html#the-scan-function",
-    "href": "posts/jax-ets/index.html#the-scan-function",
-    "title": "Implementing an ETS model in JAX",
-    "section": "The scan function",
-    "text": "The scan function\nLet’s start with a quick run down on how the scan function works. A crude Python implementation of it would look like this:\ndef scan(f, init, xs, length=None):\n  if xs is None:\n    xs = [None] * length\n  carry = init\n  ys = []\n  for x in xs:\n    carry, y = f(carry, x)\n    ys.append(y)\n  return carry, np.stack(ys)\nHere, f takes carry, which can be thought of as a state and an element x of xs, and returns a transformed carry and y. The scan function loops through the sequence xs, applying f to each element and updating the carry accordingly.\nAs an example we will calculate the square of cumulative sum of an integer sequence. Note that this implementation is not a very efficient one, we do it this way only for the sake of presentation.\n\nxs = jax.random.randint(rng_key, (100,), minval=-100, maxval=100)\n\ndef cumsum_squared(xs):\n  def transition_fn(carry, x):\n    previous_cumsum = carry\n    cumsum = previous_cumsum + x  # Update carry\n    y = cumsum ** 2  # Calculate y\n    return cumsum, y\n\n  return scan(\n      transition_fn,\n      init=0,\n      xs=xs,\n  )\n\nassert jnp.all(jnp.cumsum(xs) ** 2 == cumsum_squared(xs)[1])"
-  },
-  {
-    "objectID": "posts/jax-ets/index.html#implementing-the-model",
-    "href": "posts/jax-ets/index.html#implementing-the-model",
-    "title": "Implementing an ETS model in JAX",
-    "section": "Implementing the model",
-    "text": "Implementing the model\nWe are ready to start implementing the model, which is given by\n\\[\\begin{aligned}\ny_t &= l_{t-1} + \\varphi b_{t-1} + s_{t - m} + \\varepsilon_{t}, \\\\\nl_t &= l_{t - 1} + \\varphi b_{t - 1} + \\alpha \\varepsilon_t, \\\\\nb_t &= b_{t-1} + \\beta \\varepsilon_t, \\\\\ns_{t} &= s_{t - m} + \\gamma \\varepsilon_t.\n\\end{aligned}\\]\nThe conditional one step ahead expectation is given by\n\\[\\begin{aligned}\n\\mu_{y, t} = l_{t-1} + \\varphi b_{t-1} + s_{t - m},\n\\end{aligned}\\]\nand the conditional \\(h\\) steps ahead expectation by\n\\[\\begin{aligned}\n\\hat{y}_{t + h} = l_{t} + \\sum_{i=0}^h\\varphi^i b_{t-1} + s_{t - \\bigl\\lceil \\frac{h}{m} \\bigr\\rceil m + h}.\n\\end{aligned}\\]\nThe later one might seem a bit obnoxious, but it can be derived from the model using \\(\\mathbb{E}(\\varepsilon) = 0\\). Luckily, in our approach it suffices to always forecast one step ahead.\n\ndef transition_fn(carry, obs, alpha, beta, gamma,  phi):\n  epsilon, level, trend, season = carry\n\n  forecast = level + trend + season[0]\n  new_epsilon = jax.lax.cond(\n      jnp.isnan(obs),\n      lambda: 0.0,\n      lambda: obs - forecast,\n  )\n  new_level = level + trend + alpha * epsilon\n  new_trend = phi * trend + beta * epsilon\n  new_season = jnp.roll(season.at[0].set(season[0] + gamma * epsilon), -1)\n\n  return (new_epsilon, new_level, new_trend, new_season), forecast\n\nTwo things to mention:\n\nWhen obs is nan, we want to return the conditional one step ahead expectation. To do this, we used the jax.lax.cond condition handler. This is equivalent to 0.0 if jnp.isnan(obs) else obs - forecast, however if-else statements are not allowed in jit-compiled functions.\nSince JAX requires functions to be pure, mutation of variables is not allowed, i.e.\n\nseason[0] = season[0] + gamma * epsilon\nwould yield an error. Instead, we update the array using the syntax .at[idx].set(y)."
-  },
-  {
-    "objectID": "posts/jax-ets/index.html#prediction-and-optimization",
-    "href": "posts/jax-ets/index.html#prediction-and-optimization",
-    "title": "Implementing an ETS model in JAX",
-    "section": "Prediction and optimization",
-    "text": "Prediction and optimization\nPredicting is now as easy as scanning using some initial_state. For optimization of parameters I used LBFGS from the jaxopt library with mean squared error as a loss function, however other loss functions can also be considered.\nWe remark that constraints on the parameters could (and should) be imposed and the initial state should be optimized, instead of setting it heuristically, however we won’t bother with that, since that is not the focus of this notebook. Again, I refer the reader to Forecasting: Principles and Practice Chapter 8.6.\n\n@jax.jit\ndef predict(y, coeffs, initial_state):\n  return scan(\n      partial(\n          transition_fn,\n          alpha=coeffs[0],\n          beta=coeffs[1],\n          gamma=coeffs[2],\n          phi=coeffs[3],\n      ),\n      initial_state,\n      y,\n  )\n\n@jax.jit\ndef squared_error(y, yhat):\n  return (y - yhat) ** 2\n\n@jax.jit\ndef opt_coeffs(\n    y,\n    n_periods,\n    initial_state,\n  ):\n  def loss_func(coeffs):\n    return squared_error(y, predict(y, coeffs, initial_state)[1]).mean()\n\n  x_star = jaxopt.LBFGS(fun=loss_func, maxiter=500).run(jnp.ones(4) / 10)\n\n  return x_star.params\n\nNote that on the first run, opt_coeffs function is compiled, which slows things down.\n\n%%time\nn_periods = 12\ninitial_state = (1.0, .0, .0, y_train[:12].astype(\"float32\"))\n\ncoeffs = opt_coeffs(y_train, n_periods, initial_state)\n\nHowever, on later runs it should be pretty fast, especially on inputs of the same size, which sounds restrictive, but it can be solved using padding.\n\n%%timeit\ncoeffs = opt_coeffs(y_train, n_periods, initial_state)\n\n54.7 ms ± 18 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)\n\n\n\nfig, ax = plt.subplots(figsize=(20, 8))\n\nax.plot(y.index, y, label=\"True\")\nax.plot(\n    y.index,\n    predict(\n        jnp.concat(\n            [\n                y_train,\n                jnp.array(n_periods * [jnp.nan])\n            ]\n        ),\n        coeffs,\n         initial_state,\n    )[1],\n    label=\"ETS\",\n)\nax.axvline(\n    y.index[-12],\n    color=\"red\",\n    linestyle=\"dashed\",\n    label=\"Train-test split\",\n)\nax.legend()"
   }
 ]
