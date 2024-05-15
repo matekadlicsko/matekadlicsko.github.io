@@ -21,13 +21,6 @@
     "text": "Doing my best"
   },
   {
-    "objectID": "posts/post-with-code/index.html",
-    "href": "posts/post-with-code/index.html",
-    "title": "Post With Code",
-    "section": "",
-    "text": "This is a post with executable code."
-  },
-  {
     "objectID": "posts/jax-ets/index.html",
     "href": "posts/jax-ets/index.html",
     "title": "Implementing an ETS model in JAX",
