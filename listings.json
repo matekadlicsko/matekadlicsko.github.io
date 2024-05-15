@@ -1,6 +1,9 @@
 [
   {
     "listing": "/index.html",
-    "items": []
+    "items": [
+      "/posts/jax-ets/index.html",
+      "/posts/welcome/index.html"
+    ]
   }
 ]
