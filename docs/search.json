@@ -1,5 +1,12 @@
 [
   {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About Me",
+    "section": "",
+    "text": "Doing my best"
+  },
+  {
     "objectID": "posts/jax-ets/index.html",
     "href": "posts/jax-ets/index.html",
     "title": "Implementing an ETS model in JAX",
@@ -40,5 +47,75 @@
     "title": "Implementing an ETS model in JAX",
     "section": "Prediction and optimization",
     "text": "Prediction and optimization\nPredicting is now as easy as scanning using some initial_state. For optimization of parameters I used LBFGS from the jaxopt library with mean squared error as a loss function, however other loss functions can also be considered.\nWe remark that constraints on the parameters could (and should) be imposed and the initial state should be optimized, instead of setting it heuristically, however we won’t bother with that, since that is not the focus of this notebook. Again, I refer the reader to Forecasting: Principles and Practice Chapter 8.6.\n\n@jax.jit\ndef predict(y, coeffs, initial_state):\n  return scan(\n      partial(\n          transition_fn,\n          alpha=coeffs[0],\n          beta=coeffs[1],\n          gamma=coeffs[2],\n          phi=coeffs[3],\n      ),\n      initial_state,\n      y,\n  )\n\n@jax.jit\ndef squared_error(y, yhat):\n  return (y - yhat) ** 2\n\n@jax.jit\ndef opt_coeffs(\n    y,\n    n_periods,\n    initial_state,\n  ):\n  def loss_func(coeffs):\n    return squared_error(y, predict(y, coeffs, initial_state)[1]).mean()\n\n  x_star = jaxopt.LBFGS(fun=loss_func, maxiter=500).run(jnp.ones(4) / 10)\n\n  return x_star.params\n\nNote that on the first run, opt_coeffs function is compiled, which slows things down.\n\n%%time\nn_periods = 12\ninitial_state = (1.0, .0, .0, y_train[:12].astype(\"float32\"))\n\ncoeffs = opt_coeffs(y_train, n_periods, initial_state)\n\nHowever, on later runs it should be pretty fast, especially on inputs of the same size, which sounds restrictive, but it can be solved using padding.\n\n%%timeit\ncoeffs = opt_coeffs(y_train, n_periods, initial_state)\n\n54.7 ms ± 18 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)\n\n\n\nfig, ax = plt.subplots(figsize=(20, 8))\n\nax.plot(y.index, y, label=\"True\")\nax.plot(\n    y.index,\n    predict(\n        jnp.concat(\n            [\n                y_train,\n                jnp.array(n_periods * [jnp.nan])\n            ]\n        ),\n        coeffs,\n         initial_state,\n    )[1],\n    label=\"ETS\",\n)\nax.axvline(\n    y.index[-12],\n    color=\"red\",\n    linestyle=\"dashed\",\n    label=\"Train-test split\",\n)\nax.legend()"
+  },
+  {
+    "objectID": "posts/welcome/index.html",
+    "href": "posts/welcome/index.html",
+    "title": "Welcome To My Blog",
+    "section": "",
+    "text": "Hi, I’m a data scientist and I want to use this blog to share some things I have recently been thinking about."
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Blog",
+    "section": "",
+    "text": "Fitting monotonic curves using splines\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nImplementing an ETS model in JAX\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nWelcome To My Blog\n\n\n\n\n\n\n\n\n\n\n\nMay 15, 2024\n\n\n\n\n\n\nNo matching items"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html",
+    "href": "posts/monotonic-splines/index.html",
+    "title": "Fitting monotonic curves using splines",
+    "section": "",
+    "text": "Today I’ve decided to write a quick blog post about a feature engineering trick I’ve learned recently that enables us to fit smooth monotonic curves to data. This method is particularly useful when modeling relationships that are known to be monotonic, although not necessarily linear. For this, we will use \\(I\\)-splines introduced by J. O. These are monotonically increasing functions that one can construct from regular old \\(B\\)-splines. The two key properties of \\(I\\)-splines that we’ll leverage are that they are monotonically increasing and bounded between \\(0\\) and \\(1\\). So, if we take a linear combination of them with non-negative coefficients, the resulting function will again be monotonically increasing. Furthermore, a convex combination (a linear combination with non-negative coefficients that sum up to \\(1\\)) of \\(I\\)-splines results in a function that is also bounded between \\(0\\) and \\(1\\).\nIn this blog post we will give an implementation of \\(I\\)-splines loosely following their Rccp implementation (although another implementation is also available in the dms_variants Python package) and then we will see how they perform on data. We will not discuss splines in general; for an introduction I recommend reading The Elements of Statistical Learning, Chapter 5.\n\nimport matplotlib\nimport matplotlib.pyplot as plt\nimport numpy as np\nimport sklearn\nfrom sklearn.isotonic import IsotonicRegression\nfrom sklearn.linear_model import LinearRegression\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.utils import check_array\n\nnp.random.seed(0)\nmatplotlib.style.use(\"ggplot\")\nplt.rcParams[\"figure.figsize\"] = [10, 4]"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#introduction",
+    "href": "posts/monotonic-splines/index.html#introduction",
+    "title": "Fitting monotonic curves using splines",
+    "section": "",
+    "text": "Today I’ve decided to write a quick blog post about a feature engineering trick I’ve learned recently that enables us to fit smooth monotonic curves to data. This method is particularly useful when modeling relationships that are known to be monotonic, although not necessarily linear. For this, we will use \\(I\\)-splines introduced by J. O. These are monotonically increasing functions that one can construct from regular old \\(B\\)-splines. The two key properties of \\(I\\)-splines that we’ll leverage are that they are monotonically increasing and bounded between \\(0\\) and \\(1\\). So, if we take a linear combination of them with non-negative coefficients, the resulting function will again be monotonically increasing. Furthermore, a convex combination (a linear combination with non-negative coefficients that sum up to \\(1\\)) of \\(I\\)-splines results in a function that is also bounded between \\(0\\) and \\(1\\).\nIn this blog post we will give an implementation of \\(I\\)-splines loosely following their Rccp implementation (although another implementation is also available in the dms_variants Python package) and then we will see how they perform on data. We will not discuss splines in general; for an introduction I recommend reading The Elements of Statistical Learning, Chapter 5.\n\nimport matplotlib\nimport matplotlib.pyplot as plt\nimport numpy as np\nimport sklearn\nfrom sklearn.isotonic import IsotonicRegression\nfrom sklearn.linear_model import LinearRegression\nfrom sklearn.pipeline import make_pipeline\nfrom sklearn.utils import check_array\n\nnp.random.seed(0)\nmatplotlib.style.use(\"ggplot\")\nplt.rcParams[\"figure.figsize\"] = [10, 4]"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#spline-plots",
+    "href": "posts/monotonic-splines/index.html#spline-plots",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Spline plots",
+    "text": "Spline plots\nHere’s an implementation of \\(I\\)-splines built on top of \\(B\\)-splines with some visualizations of the basis functions. In addition, we can also see some random linear combinations of these basis functions to give us an idea about what functions can be approximated this way.\n\ndef inter_bspline(p, k, x, y):\n    num_rows, num_cols = y.shape\n    z = np.zeros((num_rows, num_cols - 1))\n\n    for j in range(num_cols - 1):\n        denom_A = k[j + p - 1] - k[j]\n        denom_B = k[j + p] - k[j + 1]\n\n        A = (x - k[j]) / denom_A * y[:, j] if denom_A &gt; 0 else 0\n        B = (k[j + p] - x) / denom_B * y[:, j + 1] if denom_B &gt; 0 else 0\n        z[:, j] = A + B\n\n    return z\n\n\ndef b_spline(p, knots, x):\n    N = knots.shape[0]\n    num_rows = x.shape[0]\n    B = np.zeros((num_rows, N - 1))\n\n    for j in range(N - 1):\n        B[:, j] = np.where((x &gt;= knots[j]) & (x &lt; knots[j + 1]), 1, 0)\n\n    for deg in range(1, p):\n        B = inter_bspline(deg + 1, knots, x, B)\n\n    return B\n\n\ndef i_spline(\n    p,\n    knots,\n    x,\n):\n    bsp = b_spline(\n        p,\n        knots,\n        x,\n    )\n    cumsummed = np.cumsum(\n        bsp[:, ::-1],\n        axis=1,\n    )[:, :-1]\n\n    return np.where(\n        (x &gt;= knots[0]) & (x &lt;= knots[-1]),\n        cumsummed.T,\n        np.where(\n            (x &lt; knots[0]),\n            0,\n            1,\n        ),\n    ).T\n\n\nknots = np.array([0.3, 0.5, 0.6])\n\nbsp = b_spline(\n    4,\n    np.concatenate([np.zeros(4) - 1e-6, knots, np.ones(4) + 1e-6]),\n    np.linspace(0, 1, 100),\n)\n\nfig, ax = plt.subplots(2, 2, figsize=(15, 10), sharex=True)\n\nfor i in range(bsp.shape[1]):\n    ax[0][0].plot(\n        np.linspace(0, 1, 100),\n        bsp[:, i],\n        linewidth=0.75,\n    )\n\nisp = i_spline(\n    4,\n    np.concatenate([np.zeros(4) - 1e-6, knots, np.ones(4) + 1e-6]),\n    np.linspace(0, 1, 100),\n)\n\nfor i in range(isp.shape[1]):\n    ax[0][1].plot(\n        np.linspace(0, 1, 100),\n        isp[:, i],\n        linewidth=0.75,\n    )\n\nfor knot in knots:\n    ax[0][0].axvline(\n        knot, color=\"red\", linestyle=\"--\", label=\"Knots\" if knot == knots[0] else None\n    )\n    ax[0][1].axvline(\n        knot,\n        color=\"red\",\n        linestyle=\"--\",\n    )\n\nax[0][0].set_title(\"B-Spline\")\nax[0][1].set_title(\"I-Spline\")\n\nax[0][0].set_ylim(0, 1)\nax[0][1].set_ylim(0, 1)\n\nfor _ in range(20):\n    coeffs_isp = np.abs(np.random.normal(size=isp.shape[1]))\n    coeffs_bsp = np.random.normal(size=bsp.shape[1])\n\n    ax[1][0].plot(\n        np.linspace(0, 1, 100),\n        bsp @ coeffs_bsp,\n        alpha=0.3,\n    )\n    ax[1][1].plot(\n        np.linspace(0, 1, 100),\n        isp @ coeffs_isp,\n        alpha=0.3,\n    )\n\nax[1][0].set_title(\"Random B-Splines\")\nax[1][1].set_title(\"Random I-Splines\")\n\nfig.legend()"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#data-generation",
+    "href": "posts/monotonic-splines/index.html#data-generation",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Data Generation",
+    "text": "Data Generation\nIn this post, we will work with synthetic data generated by \\[y_i = X_i^2 + 0.1 \\sin(20 X_i) + 1 + \\varepsilon_i,\\] where \\(\\varepsilon_i \\sim \\operatorname{N}(0, 0.1)\\) are independent.\n\nN = 1000\n\nX = np.random.uniform(0, 1, size=N)\ny =  X ** 2 + .1 * np.sin(20 * X) + 1 + .1 * np.random.randn(N)\n\nplt.scatter(X, y)"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#fit-scikit-learn-pipeline",
+    "href": "posts/monotonic-splines/index.html#fit-scikit-learn-pipeline",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Fit Scikit-Learn pipeline",
+    "text": "Fit Scikit-Learn pipeline\nWe will use Scikit Learn’s LinearRegression with the setting positive=True to enforce monotonicity. When we compare the predictions to those of sklearn’s IsotonicRegression, we find a very similar fit, however it is way smoother.\nWe note, however, that in both cases outside of the training distribution we get constant predictions.\n\npipe = make_pipeline(\n    ISplineTransformer1D(n_knots=10),\n    LinearRegression(positive=True),\n)\npipe.fit(X[:, None], y)\n\niso = IsotonicRegression(out_of_bounds=\"clip\")\niso.fit(X, y)\n\nX_test = np.linspace(-0.2, 1.2, 100)[:, None]\n\nplt.plot(X_test[:, 0], pipe.predict(X_test), color=\"blue\", linewidth=2, label=\"ISpline\")\nplt.plot(\n    X_test[:, 0], iso.predict(X_test), color=\"green\", linewidth=2, label=\"Isotonic\"\n)\n\nplt.scatter(X, y, alpha=0.3, label=\"Data\")\n\nplt.legend()"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#further-restricting-the-coefficients",
+    "href": "posts/monotonic-splines/index.html#further-restricting-the-coefficients",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Further restricting the coefficients",
+    "text": "Further restricting the coefficients"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#sklearn",
+    "href": "posts/monotonic-splines/index.html#sklearn",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Sklearn",
+    "text": "Sklearn\nFor the sake of simplicity we provide an sklearn wrapper around the i_spline function. Note that this transformer will not work with arrays containing multiple features, but of course with a little effort we could extend it to several dimension. In the two dimensional case, this can be done by constructing the basis functions \\(f_1, \\dots, f_n\\), \\(g_1, \\dots, g_m\\) for both features separately and then taking \\[h_{i, j}(x, y) = f_i(x) g_j(y) \\text{ for each } i=1, \\dots, n, j=1, \\dots, m.\\] The easiest way to obtain this would be to use the PolynomialFeatures transformer with interaction_only=True. This of course can be generalized to more dimensions.\n\nclass ISplineTransformer1D(sklearn.base.BaseEstimator, sklearn.base.TransformerMixin):\n\n    def __init__(self, p=4, n_knots=10, decreasing=False, knots=None):\n        self.p = p\n        self.knots = np.array(knots) if knots is not None else None\n        self.n_knots = n_knots\n        self.decreasing = decreasing\n\n        self.x_min_ = None\n        self.x_max_ = None\n        self.knots_ = None\n\n    def fit(self, X, y=None):\n        X = check_array(X)\n        X = (-1 if self.decreasing else 1) * X\n        self.x_min_ = np.min(X) - 1e-6\n        self.x_max_ = np.max(X) + 1e-6\n\n        if self.knots is None:\n            extended_knots = np.linspace(self.x_min_, self.x_max_, self.n_knots)\n        else:\n            extended_knots = self.knots\n\n        self.knots_ = np.concatenate(\n            [\n                np.zeros(self.p) + self.x_min_,\n                extended_knots,\n                np.zeros(self.p) + self.x_max_,\n            ],\n        )\n\n        return self\n\n    def transform(self, X):\n        return i_spline(\n            self.p,\n            self.knots_,\n            (-1 if self.decreasing else 1) * X[:, 0],\n        )"
+  },
+  {
+    "objectID": "posts/monotonic-splines/index.html#sklearn-wrapper",
+    "href": "posts/monotonic-splines/index.html#sklearn-wrapper",
+    "title": "Fitting monotonic curves using splines",
+    "section": "Sklearn wrapper",
+    "text": "Sklearn wrapper\nFor the sake of simplicity we provide an sklearn wrapper around the i_spline function. Note that this transformer will not work with arrays containing multiple features, but with a little effort, we could extend it to multiple dimensions. In the two dimensional case, this can be done by constructing the basis functions \\(f_1, \\dots, f_n\\), \\(g_1, \\dots, g_m\\) for both features separately and then taking \\[h_{i, j}(x, y) = f_i(x) g_j(y) \\text{ for each } i=1, \\dots, n,\\hskip 2pt  j=1, \\dots, m.\\] The easiest way to obtain this would be to use the PolynomialFeatures transformer with interaction_only=True. This of course can be generalized to more dimensions.\n\nclass ISplineTransformer1D(sklearn.base.BaseEstimator, sklearn.base.TransformerMixin):\n\n    def __init__(self, p=4, n_knots=10, decreasing=False, knots=None):\n        self.p = p\n        self.knots = np.array(knots) if knots is not None else None\n        self.n_knots = n_knots\n        self.decreasing = decreasing\n\n        self.x_min_ = None\n        self.x_max_ = None\n        self.knots_ = None\n\n    def fit(self, X, y=None):\n        X = check_array(X)\n        X = (-1 if self.decreasing else 1) * X\n        self.x_min_ = np.min(X) - 1e-6\n        self.x_max_ = np.max(X) + 1e-6\n\n        if self.knots is None:\n            extended_knots = np.linspace(self.x_min_, self.x_max_, self.n_knots)\n        else:\n            extended_knots = self.knots\n\n        self.knots_ = np.concatenate(\n            [\n                np.zeros(self.p) + self.x_min_,\n                extended_knots,\n                np.zeros(self.p) + self.x_max_,\n            ],\n        )\n\n        return self\n\n    def transform(self, X):\n        return i_spline(\n            self.p,\n            self.knots_,\n            (-1 if self.decreasing else 1) * X[:, 0],\n        )"
   }
 ]
