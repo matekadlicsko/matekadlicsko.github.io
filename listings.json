@@ -2,6 +2,7 @@
   {
     "listing": "/index.html",
     "items": [
+      "/posts/monotonic-splines/index.html",
       "/posts/jax-ets/index.html",
       "/posts/welcome/index.html"
     ]
